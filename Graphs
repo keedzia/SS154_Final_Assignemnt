@@ -1,0 +1,121 @@
+> # Load Libraries
+> library(ggplot2)
+> library(dplyr)
+> 
+> # Shared theme
+> theme_paper <- theme_minimal(base_size = 12) +
++     theme(
++         plot.title       = element_text(size = 13, face = "bold", hjust = 0.5, margin = margin(b = 4)),
++         plot.subtitle    = element_text(size = 10, color = "grey50", hjust = 0.5, margin = margin(b = 14)),
++         plot.caption     = element_text(size = 9, color = "grey55", margin = margin(t = 10)),
++         axis.title.x     = element_text(size = 11, color = "grey30", margin = margin(t = 8)),
++         axis.title.y     = element_blank(),
++         axis.text        = element_text(size = 11, color = "grey30"),
++         panel.grid.minor   = element_blank(),
++         panel.grid.major.y = element_blank(),
++         panel.grid.major.x = element_line(color = "grey92", linewidth = 0.5),
++         plot.background  = element_rect(fill = "white", color = NA),
++         panel.background = element_rect(fill = "white", color = NA),
++         plot.margin      = margin(16, 24, 16, 16)
++     )
+> 
+> # Figure 2: Forest Plot - BWC Coefficient Across Model Specifications
+> models_df <- data.frame(
++     model = c("IV (2SLS)", "Logit (no state FE)", "Logit (full)", "OLS / LPM"),
++     coef  = c(-0.4145, -0.2436, -0.2351, -0.0122),
++     se    = c( 0.2967,  0.1707,  0.1788,  0.0082),
++     pval  = c( 0.162,   0.154,   0.189,   0.137)
++ ) %>%
++     mutate(
++         ci_lo     = coef - 1.96 * se,
++         ci_hi     = coef + 1.96 * se,
++         model     = factor(model, levels = rev(c("IV (2SLS)", "Logit (no state FE)", "Logit (full)", "OLS / LPM"))),
++         preferred = model == "IV (2SLS)",
++         label     = paste0(sprintf("%.3f", coef), "  (p=", pval, ")")
++     )
+> 
+> p1 <- ggplot(models_df, aes(x = coef, y = model)) +
++     geom_vline(xintercept = 0, linetype = "dashed", color = "grey60", linewidth = 0.6) +
++     geom_errorbarh(
++         aes(xmin = ci_lo, xmax = ci_hi),
++         height = 0.15, color = "grey65", linewidth = 0.75
++     ) +
++     geom_point(aes(color = preferred, size = preferred)) +
++     scale_color_manual(values = c("TRUE" = "#1B4332", "FALSE" = "#74B69A"), guide = "none") +
++     scale_size_manual(values  = c("TRUE" = 4.5, "FALSE" = 3.5),            guide = "none") +
++     geom_text(
++         aes(x = ci_hi, label = label),
++         hjust = -0.08, size = 3.3, color = "grey40"
++     ) +
++     scale_x_continuous(
++         limits = c(-1.05, 0.6),
++         breaks = seq(-1, 0.5, 0.25),
++         labels = function(x) sprintf("%.2f", x)
++     ) +
++     labs(
++         title    = "Figure 2: BWC coefficient across all model specifications",
++         subtitle = "Point estimates with 95% confidence intervals. IV estimate highlighted in dark green.",
++         x        = "Coefficient estimate",
++         caption  = "Note: All estimates are negative and consistent in direction, but none reach conventional\nstatistical significance (p < 0.05). 95% CIs shown."
++     ) +
++     theme_paper
+> 
+> print(p1)
+`height` was translated to `width`.
+> ggsave("figure2_forest_plot.png", plot = p1, width = 8, height = 4.5, dpi = 300, bg = "white")
+`height` was translated to `width`.
+> 
+> # Figure 3: Year Fixed Effects
+> year_df <- data.frame(
++     year = c(2016, 2017, 2018, 2019, 2020, 2021, 2022),
++     coef = c(0.045, 0.030, 0.061, 0.063, 0.062, 0.086, 0.136),
++     se   = c(0.027, 0.018, 0.021, 0.026, 0.038, 0.045, 0.051),
++     sig  = c("p<0.1", "p<0.1", "p<0.01", "p<0.05", "p<0.1", "n.s.", "p<0.01")
++ ) %>%
++     mutate(
++         ci_lo = coef - 1.96 * se,
++         ci_hi = coef + 1.96 * se,
++         sig   = factor(sig, levels = c("p<0.01", "p<0.05", "p<0.1", "n.s."))
++     )
+> 
+> p2 <- ggplot(year_df, aes(x = year, y = coef)) +
++     geom_hline(yintercept = 0, linetype = "dashed", color = "grey60", linewidth = 0.5) +
++     geom_ribbon(aes(ymin = ci_lo, ymax = ci_hi), fill = "#C8B89A", alpha = 0.3) +
++     geom_line(color = "#854F0B", linewidth = 1.2) +
++     geom_point(aes(color = sig, size = sig)) +
++     scale_color_manual(
++         name   = "Significance",
++         values = c("p<0.01" = "#1B4332", "p<0.05" = "#52B788", "p<0.1" = "#95D5B2", "n.s." = "grey70")
++     ) +
++     scale_size_manual(
++         name   = "Significance",
++         values = c("p<0.01" = 4, "p<0.05" = 3.5, "p<0.1" = 3, "n.s." = 2.5)
++     ) +
++     scale_x_continuous(breaks = 2016:2022) +
++     scale_y_continuous(breaks = seq(0, 0.25, 0.05)) +
++     labs(
++         title    = "Figure 3: Year fixed effects \u2014 probability of lethal-only outcome (IV model)",
++         subtitle = "Coefficients relative to 2015 baseline. Rising trend indicates increasing lethal-force rate over time.",
++         x        = "Year",
++         y        = "Coefficient (pp change vs 2015)",
++         caption  = "Source: Washington Post Fatal Force Database 2015\u20132022.\nShaded area shows 95% confidence interval."
++     ) +
++     theme_minimal(base_size = 12) +
++     theme(
++         plot.title       = element_text(size = 13, face = "bold", hjust = 0.5, margin = margin(b = 4)),
++         plot.subtitle    = element_text(size = 10, color = "grey50", hjust = 0.5, margin = margin(b = 14)),
++         plot.caption     = element_text(size = 9, color = "grey55", margin = margin(t = 10)),
++         axis.title       = element_text(size = 11, color = "grey30"),
++         axis.text        = element_text(size = 11, color = "grey30"),
++         panel.grid.minor = element_blank(),
++         panel.grid.major = element_line(color = "grey92", linewidth = 0.5),
++         plot.background  = element_rect(fill = "white", color = NA),
++         panel.background = element_rect(fill = "white", color = NA),
++         legend.position  = "right",
++         legend.title     = element_text(size = 10),
++         legend.text      = element_text(size = 9),
++         plot.margin      = margin(16, 16, 16, 16)
++     )
+> 
+> print(p2)
+> ggsave("figure3_year_effects.png", plot = p2, width = 8, height = 5, dpi = 300, bg = "white")
