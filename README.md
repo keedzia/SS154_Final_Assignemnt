@@ -38,19 +38,8 @@ Does the presence of a body-worn camera on an officer reduce their reliance on l
 - OLS Linear Probability Model (robustness check)
 - Manual IV Second Stage (robustness check)
 
-## Key Findings
-| Model | BWC Coefficient | p-value |
-|---|---|---|
-| Logistic Regression (full) | −0.2351 (OR = 0.79) | 0.189 |
-| Logistic Regression (no state FE) | −0.2436 | 0.154 |
-| OLS / LPM | −0.0122 | 0.137 |
-| IV (2SLS) | −0.4145 | 0.162 |
-
-All estimates are consistently negative but do not reach conventional statistical significance. The IV weak instruments diagnostic F = 5.945 falls below the conventional threshold of 10.
 
 ## Requirements
 ```r
 install.packages(c("dplyr", "AER", "lmtest", "kableExtra"))
 ```
-
-## File Structure
