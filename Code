@@ -1,0 +1,354 @@
+# Load Libraries
+library(dplyr)
+library(AER)
+library(lmtest)
+library(kableExtra)
+
+# Load Data
+df <- SS154_Police_Force_Dataset_IV_update_
+
+# Logistic Regression - Clean and Encode Variables
+df_clean <- df %>%
+  mutate(
+    lethal_response = ifelse(manner_of_death == "shot", 1, 0),
+    bwc            = as.factor(body_camera),
+    year           = as.factor(as.numeric(format(as.Date(date), "%Y"))),
+    race           = as.factor(race),
+    gender         = as.factor(gender),
+    mental_illness = as.factor(signs_of_mental_illness),
+    threat         = as.factor(threat_level),
+    fleeing        = as.factor(flee),
+    is_armed       = as.factor(armed),
+    location       = as.factor(state)
+  ) %>%
+  filter(!is.na(lethal_response), !is.na(bwc))
+
+# Logistic Regression - Full Model
+model <- glm(lethal_response ~ bwc + year + race + age + gender +
+               mental_illness + threat + fleeing + is_armed + location,
+             data = df_clean,
+             family = binomial(link = "logit"))
+
+exp(coef(model))
+summary(model)
+
+# Logistic Regression - Key Variables Table
+logit_coefs <- summary(model)$coefficients
+
+key_vars <- c("bwcTRUE",
+              "year2016", "year2017", "year2018",
+              "year2019", "year2020", "year2021", "year2022",
+              "raceB", "raceH", "raceN", "raceO", "raceW",
+              "age", "genderM", "mental_illnessTRUE",
+              "threatother", "threatundetermined",
+              "fleeingFoot", "fleeingNot fleeing", "fleeingOther")
+
+logit_table <- as.data.frame(logit_coefs[key_vars, ])
+logit_table$OddsRatio <- round(exp(logit_table$Estimate), 3)
+logit_table <- logit_table %>%
+  mutate(
+    Estimate     = round(Estimate, 4),
+    `Std. Error` = round(`Std. Error`, 4),
+    `z value`    = round(`z value`, 3),
+    `Pr(>|z|)`   = round(`Pr(>|z|)`, 4),
+    Significance = case_when(
+      `Pr(>|z|)` < 0.001 ~ "***",
+      `Pr(>|z|)` < 0.01  ~ "**",
+      `Pr(>|z|)` < 0.05  ~ "*",
+      `Pr(>|z|)` < 0.1   ~ ".",
+      TRUE               ~ ""
+    )
+  )
+
+rownames(logit_table) <- c(
+  "BWC Present",
+  "Year 2016", "Year 2017", "Year 2018", "Year 2019",
+  "Year 2020", "Year 2021", "Year 2022",
+  "Race: Black", "Race: Hispanic", "Race: Native American",
+  "Race: Other", "Race: White",
+  "Age", "Gender: Male", "Signs of Mental Illness",
+  "Threat Level: Other", "Threat Level: Undetermined",
+  "Flee: Foot", "Flee: Not Fleeing", "Flee: Other"
+)
+
+kable(logit_table,
+      caption = "Table 3: Logistic Regression Results (Key Variables)",
+      format = "simple",
+      col.names = c("Coef.", "Std. Err.", "z", "p-value", "Odds Ratio", "Sig."))
+
+# IV Setup
+df_iv <- df %>%
+  mutate(
+    lethal = as.integer(manner_of_death == "shot"),
+    bwc    = as.integer(body_camera == TRUE),
+    year   = as.numeric(format(as.Date(date), "%Y"))
+  ) %>%
+  na.omit()
+
+# IV Regression (2SLS)
+iv_model <- ivreg(lethal ~ bwc + factor(year) + factor(race) + age +
+                    factor(gender) + signs_of_mental_illness +
+                    factor(threat_level) + factor(flee) +
+                    factor(armed) + factor(state) |
+                    bwc_grant_active + factor(year) + factor(race) + age +
+                    factor(gender) + signs_of_mental_illness +
+                    factor(threat_level) + factor(flee) +
+                    factor(armed) + factor(state),
+                  data = df_iv)
+
+summary(iv_model, diagnostics = TRUE)
+
+# First Stage
+first_stage <- lm(bwc ~ bwc_grant_active + factor(year) + factor(race) + age +
+                    factor(gender) + signs_of_mental_illness +
+                    factor(threat_level) + factor(flee) +
+                    factor(armed) + factor(state),
+                  data = df_iv)
+
+summary(first_stage)
+waldtest(first_stage)
+
+# Summary Statistics Table - analytic sample (shot vs shot and Tasered only)
+df_outcome <- df %>% filter(manner_of_death %in% c("shot", "shot and Tasered"))
+
+df_summary_full <- data.frame(
+  Variable = c("Lethal (Outcome)",
+               "Body-Worn Camera (Treatment)",
+               "Age of Victim",
+               "Signs of Mental Illness",
+               "Year"),
+  N    = c(sum(!is.na(as.integer(df_outcome$manner_of_death == "shot"))),
+           sum(!is.na(df_outcome$body_camera)),
+           sum(!is.na(df_outcome$age)),
+           sum(!is.na(df_outcome$signs_of_mental_illness)),
+           sum(!is.na(as.numeric(format(as.Date(df_outcome$date), "%Y"))))),
+  Mean = c(round(mean(as.integer(df_outcome$manner_of_death == "shot"), na.rm = TRUE), 2),
+           round(mean(as.integer(df_outcome$body_camera == TRUE), na.rm = TRUE), 2),
+           round(mean(df_outcome$age, na.rm = TRUE), 2),
+           round(mean(as.integer(df_outcome$signs_of_mental_illness == TRUE), na.rm = TRUE), 2),
+           round(mean(as.numeric(format(as.Date(df_outcome$date), "%Y")), na.rm = TRUE), 2)),
+  SD   = c(round(sd(as.integer(df_outcome$manner_of_death == "shot"), na.rm = TRUE), 2),
+           round(sd(as.integer(df_outcome$body_camera == TRUE), na.rm = TRUE), 2),
+           round(sd(df_outcome$age, na.rm = TRUE), 2),
+           round(sd(as.integer(df_outcome$signs_of_mental_illness == TRUE), na.rm = TRUE), 2),
+           round(sd(as.numeric(format(as.Date(df_outcome$date), "%Y")), na.rm = TRUE), 2)),
+  Min  = c(round(min(as.integer(df_outcome$manner_of_death == "shot"), na.rm = TRUE), 2),
+           round(min(as.integer(df_outcome$body_camera == TRUE), na.rm = TRUE), 2),
+           round(min(df_outcome$age, na.rm = TRUE), 2),
+           round(min(as.integer(df_outcome$signs_of_mental_illness == TRUE), na.rm = TRUE), 2),
+           round(min(as.numeric(format(as.Date(df_outcome$date), "%Y")), na.rm = TRUE), 2)),
+  Max  = c(round(max(as.integer(df_outcome$manner_of_death == "shot"), na.rm = TRUE), 2),
+           round(max(as.integer(df_outcome$body_camera == TRUE), na.rm = TRUE), 2),
+           round(max(df_outcome$age, na.rm = TRUE), 2),
+           round(max(as.integer(df_outcome$signs_of_mental_illness == TRUE), na.rm = TRUE), 2),
+           round(max(as.numeric(format(as.Date(df_outcome$date), "%Y")), na.rm = TRUE), 2))
+)
+
+kable(df_summary_full,
+      caption = "Table 1: Summary Statistics",
+      digits = 2,
+      format = "simple")
+
+# Categorical Summary Tables
+race_table <- as.data.frame(table(df_clean$race)) %>%
+  mutate(Percentage = round(Freq / sum(Freq) * 100, 1)) %>%
+  rename(Category = Var1, Count = Freq)
+kable(race_table, caption = "Table 2a: Race of Victim", format = "simple")
+
+gender_table <- as.data.frame(table(df_clean$gender)) %>%
+  mutate(Percentage = round(Freq / sum(Freq) * 100, 1)) %>%
+  rename(Category = Var1, Count = Freq)
+kable(gender_table, caption = "Table 2b: Gender of Victim", format = "simple")
+
+threat_table <- as.data.frame(table(df_clean$threat)) %>%
+  mutate(Percentage = round(Freq / sum(Freq) * 100, 1)) %>%
+  rename(Category = Var1, Count = Freq)
+kable(threat_table, caption = "Table 2c: Threat Level", format = "simple")
+
+flee_table <- as.data.frame(table(df_clean$fleeing)) %>%
+  mutate(Percentage = round(Freq / sum(Freq) * 100, 1)) %>%
+  rename(Category = Var1, Count = Freq)
+kable(flee_table, caption = "Table 2d: Fleeing Behavior", format = "simple")
+
+year_table <- as.data.frame(table(df_clean$year)) %>%
+  mutate(Percentage = round(Freq / sum(Freq) * 100, 1)) %>%
+  rename(Category = Var1, Count = Freq)
+kable(year_table, caption = "Table 2e: Year", format = "simple")
+
+armed_table <- as.data.frame(table(df_clean$is_armed)) %>%
+  mutate(Percentage = round(Freq / sum(Freq) * 100, 1)) %>%
+  rename(Category = Var1, Count = Freq) %>%
+  arrange(desc(Count)) %>%
+  head(10)
+kable(armed_table,
+      caption = "Table 2f: Armed Status (Top 10 Most Common)",
+      format = "simple")
+
+state_table <- as.data.frame(table(df_clean$location)) %>%
+  mutate(Percentage = round(Freq / sum(Freq) * 100, 1)) %>%
+  rename(Category = Var1, Count = Freq) %>%
+  arrange(desc(Count)) %>%
+  head(10)
+kable(state_table,
+      caption = "Table 2g: State (Top 10 Most Common)",
+      format = "simple")
+
+# OLS Linear Probability Model
+ols_model <- lm(lethal ~ bwc + factor(year) + factor(race) + age +
+                  factor(gender) + signs_of_mental_illness +
+                  factor(threat_level) + factor(flee) +
+                  factor(armed) + factor(state),
+                data = df_iv)
+
+summary(ols_model)
+
+# OLS Key Variables Table
+ols_coefs <- summary(ols_model)$coefficients
+
+ols_key_vars <- c("bwc",
+                  "factor(year)2016", "factor(year)2017", "factor(year)2018",
+                  "factor(year)2019", "factor(year)2020", "factor(year)2021",
+                  "factor(year)2022",
+                  "factor(race)B", "factor(race)H", "factor(race)N",
+                  "factor(race)O", "factor(race)W",
+                  "age", "factor(gender)M",
+                  "signs_of_mental_illnessTRUE",
+                  "factor(threat_level)other", "factor(threat_level)undetermined",
+                  "factor(flee)Foot", "factor(flee)Not fleeing", "factor(flee)Other")
+
+ols_table <- as.data.frame(ols_coefs[ols_key_vars, ])
+ols_table <- ols_table %>%
+  mutate(
+    Estimate     = round(Estimate, 4),
+    `Std. Error` = round(`Std. Error`, 4),
+    `t value`    = round(`t value`, 3),
+    `Pr(>|t|)`   = round(`Pr(>|t|)`, 4),
+    Significance = case_when(
+      `Pr(>|t|)` < 0.001 ~ "***",
+      `Pr(>|t|)` < 0.01  ~ "**",
+      `Pr(>|t|)` < 0.05  ~ "*",
+      `Pr(>|t|)` < 0.1   ~ ".",
+      TRUE               ~ ""
+    )
+  )
+
+rownames(ols_table) <- c(
+  "BWC Present",
+  "Year 2016", "Year 2017", "Year 2018", "Year 2019",
+  "Year 2020", "Year 2021", "Year 2022",
+  "Race: Black", "Race: Hispanic", "Race: Native American",
+  "Race: Other", "Race: White",
+  "Age", "Gender: Male", "Signs of Mental Illness",
+  "Threat Level: Other", "Threat Level: Undetermined",
+  "Flee: Foot", "Flee: Not Fleeing", "Flee: Other"
+)
+
+kable(ols_table,
+      caption = "Table 4: Robustness Check - OLS Linear Probability Model (Key Variables)",
+      format = "simple",
+      col.names = c("Coef.", "Std. Err.", "t", "p-value", "Sig."))
+
+# Logistic Regression Without State Fixed Effects
+logit_no_state <- glm(lethal ~ bwc + factor(year) + factor(race) + age +
+                        factor(gender) + signs_of_mental_illness +
+                        factor(threat_level) + factor(flee) +
+                        factor(armed),
+                      data = df_iv, family = "binomial")
+
+summary(logit_no_state)
+
+# BWC Coefficient Comparison Across Models
+comparison_table <- data.frame(
+  Model = c("Logistic Regression (full)",
+            "Logistic Regression (no state FE)",
+            "OLS / LPM",
+            "IV (2SLS)"),
+  BWC_Coef  = c(-0.2351,
+                round(coef(logit_no_state)["bwc"], 4),
+                round(coef(ols_model)["bwc"], 4),
+                -0.4145),
+  Std_Error = c(0.1788,
+                round(summary(logit_no_state)$coefficients["bwc", 2], 4),
+                round(summary(ols_model)$coefficients["bwc", 2], 4),
+                0.2967),
+  P_Value   = c(0.1886,
+                round(summary(logit_no_state)$coefficients["bwc", 4], 4),
+                round(summary(ols_model)$coefficients["bwc", 4], 4),
+                0.1624),
+  Significance = ""
+) %>%
+  mutate(Significance = case_when(
+    P_Value < 0.001 ~ "***",
+    P_Value < 0.01  ~ "**",
+    P_Value < 0.05  ~ "*",
+    P_Value < 0.1   ~ ".",
+    TRUE            ~ ""
+  ))
+
+kable(comparison_table,
+      caption = "Table 5: Robustness Check - BWC Coefficient Across Models",
+      format = "simple",
+      col.names = c("Model", "BWC Coef.", "Std. Err.", "p-value", "Sig."))
+
+# IV Second Stage (Manual 2SLS)
+first_stage_fitted <- lm(bwc ~ bwc_grant_active + factor(year) + factor(race) + age +
+                           factor(gender) + signs_of_mental_illness +
+                           factor(threat_level) + factor(flee) +
+                           factor(armed) + factor(state),
+                         data = df_iv)
+
+df_iv$bwc_hat <- fitted(first_stage_fitted)
+
+second_stage <- lm(lethal ~ bwc_hat + factor(year) + factor(race) + age +
+                     factor(gender) + signs_of_mental_illness +
+                     factor(threat_level) + factor(flee) +
+                     factor(armed) + factor(state),
+                   data = df_iv)
+
+summary(second_stage)
+
+# IV Second Stage - Key Variables Table
+second_coefs <- summary(second_stage)$coefficients
+
+second_key_vars <- c("bwc_hat",
+                     "factor(year)2016", "factor(year)2017", "factor(year)2018",
+                     "factor(year)2019", "factor(year)2020", "factor(year)2021",
+                     "factor(year)2022",
+                     "factor(race)B", "factor(race)H", "factor(race)N",
+                     "factor(race)O", "factor(race)W",
+                     "age", "factor(gender)M",
+                     "signs_of_mental_illnessTRUE",
+                     "factor(threat_level)other", "factor(threat_level)undetermined",
+                     "factor(flee)Foot", "factor(flee)Not fleeing", "factor(flee)Other")
+
+second_table <- as.data.frame(second_coefs[second_key_vars, ])
+second_table <- second_table %>%
+  mutate(
+    Estimate     = round(Estimate, 4),
+    `Std. Error` = round(`Std. Error`, 4),
+    `t value`    = round(`t value`, 3),
+    `Pr(>|t|)`   = round(`Pr(>|t|)`, 4),
+    Significance = case_when(
+      `Pr(>|t|)` < 0.001 ~ "***",
+      `Pr(>|t|)` < 0.01  ~ "**",
+      `Pr(>|t|)` < 0.05  ~ "*",
+      `Pr(>|t|)` < 0.1   ~ ".",
+      TRUE               ~ ""
+    )
+  )
+
+rownames(second_table) <- c(
+  "BWC (Predicted)",
+  "Year 2016", "Year 2017", "Year 2018", "Year 2019",
+  "Year 2020", "Year 2021", "Year 2022",
+  "Race: Black", "Race: Hispanic", "Race: Native American",
+  "Race: Other", "Race: White",
+  "Age", "Gender: Male", "Signs of Mental Illness",
+  "Threat Level: Other", "Threat Level: Undetermined",
+  "Flee: Foot", "Flee: Not Fleeing", "Flee: Other"
+)
+
+kable(second_table,
+      caption = "Table 6: IV Second Stage Results (Key Variables)",
+      format = "simple",
+      col.names = c("Coef.", "Std. Err.", "t", "p-value", "Sig."))
